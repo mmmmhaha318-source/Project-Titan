@@ -1,4 +1,4 @@
-name: Titan Unchained
+name: Titan Unchained v2.0
 on:
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install Dependencies
+      - name: Install Dependencies & Tools
         run: |
           pip install requests deep-translator
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
@@ -37,6 +37,8 @@ jobs:
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
           mkdir -p results/${{ matrix.target }}
+          # The FIX: Install nuclei templates
+          nuclei -update-templates
 
       - name: Run Recon
         id: recon
@@ -55,7 +57,7 @@ jobs:
         if: steps.recon.outputs.live_hosts_found == 'true'
         run: |
           echo "Running Scan for ${{ matrix.target }}"
-          nuclei -l results/${{ matrix.target }}/live_hosts.txt -t "technologies,cves,vulnerabilities,misconfiguration" -o results/${{ matrix.target }}/nuclei_raw.txt -silent -severity critical,high,medium
+          nuclei -l results/${{ matrix.target }}/live_hosts.txt -o results/${{ matrix.target }}/nuclei_raw.txt -silent -severity critical,high,medium
           if [ -s "results/${{ matrix.target }}/nuclei_raw.txt" ]; then
             echo "findings_detected=true" >> $GITHUB_OUTPUT
           else
@@ -63,7 +65,7 @@ jobs:
           fi
 
       - name: Analyze and Report
-        if: steps.scan.outputs.findings_detected == 'true'
+        if: success() && steps.scan.outputs.findings_detected == 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
@@ -75,11 +77,18 @@ jobs:
           python3 core/pdf_generator.py "${{ matrix.target }}" "$AI_SUMMARY" "results/${{ matrix.target }}/nuclei_raw.txt"
 
       - name: Send Completion Notification
-        if: always() && steps.scan.outputs.findings_detected != 'true'
+        if: success() && steps.scan.outputs.findings_detected != 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python3 core/discord_notifier.py "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
+
+      - name: Send Failure Notification
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python3 core/discord_notifier.py "❌ Titan Hunt Failed" "The hunt for ${{ matrix.target }} failed. Please check the logs."
 
       - name: Upload Artifacts
         if: always()

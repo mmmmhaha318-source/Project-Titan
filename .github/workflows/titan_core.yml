@@ -1,4 +1,4 @@
-name: Titan Core v3.0 - The Communicator
+name: Titan Core v4.0 - The Warrior
 
 on:
   workflow_dispatch:
@@ -20,11 +20,17 @@ jobs:
         run: |
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
+          nuclei -update-templates
       - name: Execute Module [recon/web_basic]
         run: |
           chmod +x modules/recon/web_basic.sh
           ./modules/recon/web_basic.sh ${{ matrix.target }}
+      - name: Execute Module [vuln_scan/web_basic]
+        run: |
+          chmod +x modules/vuln_scan/web_basic.sh
+          ./modules/vuln_scan/web_basic.sh ${{ matrix.target }}
       - name: Report to Command Center
         if: always()
         env:

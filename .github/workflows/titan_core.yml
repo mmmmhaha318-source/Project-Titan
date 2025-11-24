@@ -1,49 +1,91 @@
 name: Titan Core v4.0 - The Warrior
-
 on:
   workflow_dispatch:
 
 jobs:
+  read_config:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.get_targets.outputs.targets_json }}
+    steps:
+      - name: Checkout Project Code
+        uses: actions/checkout@v4
+      - id: get_targets
+        name: Read targets from config
+        run: |
+          targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config/targets.txt)
+          echo "targets_json=$targets_json" >> $GITHUB_OUTPUT
+
   hunt:
+    needs: read_config
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        target: ${{ fromJson(needs.read_config.outputs.targets_json) }}
-    needs: read_config
+        target: ${{ fromJson(needs.read_config.outputs.targets) }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.10' }
-      - run: pip install requests
-      - name: Install Titan's Arsenal
+      - name: Checkout Project Code
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libnspr4 libnss3 libnss3-tools
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Python Dependencies
+        run: pip install requests deep-translator
+
+      - name: Install Recon Tools
         run: |
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
-          nuclei -update-templates
-      - name: Execute Module [recon/web_basic]
+
+      - name: Create Results Directory
+        run: mkdir -p results/${{ matrix.target }}
+
+      - name: Run Recon Module
         run: |
-          chmod +x modules/recon/web_basic.sh
-          ./modules/recon/web_basic.sh ${{ matrix.target }}
-      - name: Execute Module [vuln_scan/web_basic]
+          chmod +x modules/recon/recon.sh
+          ./modules/recon/recon.sh ${{ matrix.target }}
+
+      - name: Run Vulnerability Scan Module
+        id: vulnerability_scan
         run: |
-          chmod +x modules/vuln_scan/web_basic.sh
-          ./modules/vuln_scan/web_basic.sh ${{ matrix.target }}
-      - name: Report to Command Center
-        if: always()
+          chmod +x modules/vulnerability/scan.sh
+          ./modules/vulnerability/scan.sh ${{ matrix.target }}
+
+      - name: Run AI Analysis & Reporting Module
+        if: steps.vulnerability_scan.outputs.findings_detected == 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python core/reporter.py ${{ matrix.target }}
-
-  read_config:
-    runs-on: ubuntu-latest
-    outputs:
-      targets_json: ${{ steps.read_targets_file.outputs.targets_json }}
-    steps:
-      - uses: actions/checkout@v4
-      - id: read_targets_file
+          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
         run: |
-          targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config/targets.txt)
-          echo "targets_json=$targets_json" >> $GITHUB_OUTPUT
+          chmod +x modules/reporting/analyze_and_report.sh
+          ./modules/reporting/analyze_and_report.sh ${{ matrix.target }}
+
+      - name: Send Completion Notification
+        if: always() && steps.vulnerability_scan.outputs.findings_detected != 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          chmod +x modules/reporting/notify.sh
+          ./modules/reporting/notify.sh "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.target }}
+          path: results/${{ matrix.target }}/

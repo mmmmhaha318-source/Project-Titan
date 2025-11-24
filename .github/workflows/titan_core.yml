@@ -1,91 +1,34 @@
-name: Titan Core v4.0 - The Warrior
+name: The Truth
 on:
   workflow_dispatch:
 
 jobs:
-  read_config:
+  debug:
     runs-on: ubuntu-latest
-    outputs:
-      targets: ${{ steps.get_targets.outputs.targets_json }}
-    steps:
-      - name: Checkout Project Code
-        uses: actions/checkout@v4
-      - id: get_targets
-        name: Read targets from config
-        run: |
-          targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config/targets.txt)
-          echo "targets_json=$targets_json" >> $GITHUB_OUTPUT
-
-  hunt:
-    needs: read_config
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJson(needs.read_config.outputs.targets) }}
     steps:
       - name: Checkout Project Code
         uses: actions/checkout@v4
 
-      - name: Install System Dependencies
+      - name: Show me the truth - List ALL files
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libnspr4 libnss3 libnss3-tools
+          echo "================== ROOT DIRECTORY =================="
+          ls -la
+          echo "================== .github/workflows DIRECTORY =================="
+          ls -la .github/workflows/
+          echo "================== core DIRECTORY =================="
+          ls -la core/
+          echo "================== modules DIRECTORY =================="
+          ls -la modules/
+          echo "================== modules/recon DIRECTORY =================="
+          ls -la modules/recon/
+          echo "================== modules/vulnerability DIRECTORY =================="
+          ls -la modules/vulnerability/
+          echo "================== modules/reporting DIRECTORY =================="
+          ls -la modules/reporting/
 
-      - name: Install Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.21'
-
-      - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install Python Dependencies
-        run: pip install requests deep-translator
-
-      - name: Install Recon Tools
+      - name: Show me the truth - Show me the file content
         run: |
-          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-          echo "$HOME/go/bin" >> $GITHUB_PATH
-
-      - name: Create Results Directory
-        run: mkdir -p results/${{ matrix.target }}
-
-      - name: Run Recon Module
-        run: |
-          chmod +x modules/recon/recon.sh
-          ./modules/recon/recon.sh ${{ matrix.target }}
-
-      - name: Run Vulnerability Scan Module
-        id: vulnerability_scan
-        run: |
-          chmod +x modules/vulnerability/scan.sh
-          ./modules/vulnerability/scan.sh ${{ matrix.target }}
-
-      - name: Run AI Analysis & Reporting Module
-        if: steps.vulnerability_scan.outputs.findings_detected == 'true'
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
-        run: |
-          chmod +x modules/reporting/analyze_and_report.sh
-          ./modules/reporting/analyze_and_report.sh ${{ matrix.target }}
-
-      - name: Send Completion Notification
-        if: always() && steps.vulnerability_scan.outputs.findings_detected != 'true'
-        env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          chmod +x modules/reporting/notify.sh
-          ./modules/reporting/notify.sh "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
-
-      - name: Upload Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: results-${{ matrix.target }}
-          path: results/${{ matrix.target }}/
+          echo "================== CONTENT of titan_core.yml =================="
+          cat .github/workflows/titan_core.yml
+          echo "================== CONTENT of analyze_and_report.sh =================="
+          cat modules/reporting/analyze_and_report.sh

@@ -1,11 +1,40 @@
-name: Titan Core v1.0
+name: Titan Core v2.0 - The Hunter
 
 on:
   workflow_dispatch:
 
 jobs:
-  core_check:
+  hunt:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.read_config.outputs.targets_json) }}
+    needs: read_config
     steps:
-      - name: Titan Heartbeat Check
-        run: echo "Titan Core is alive and beating. The age of gods has begun."
+      - uses: actions/checkout@v4
+      - name: Install Titan's Arsenal
+        run: |
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+      - name: Execute Module [recon/web_basic]
+        run: |
+          chmod +x modules/recon/web_basic.sh
+          ./modules/recon/web_basic.sh ${{ matrix.target }}
+      - name: Archive Recon Data
+        uses: actions/upload-artifact@v4
+        with:
+          name: recon-data-${{ matrix.target }}
+          path: results/${{ matrix.target }}/recon
+
+  read_config:
+    runs-on: ubuntu-latest
+    outputs:
+      targets_json: ${{ steps.read_targets_file.outputs.targets_json }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: read_targets_file
+        run: |
+          targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config/targets.txt)
+          echo "targets_json=$targets_json" >> $GITHUB_OUTPUT

@@ -1,4 +1,4 @@
-name: Titan Core v2.0 - The Hunter
+name: Titan Core v3.0 - The Communicator
 
 on:
   workflow_dispatch:
@@ -13,6 +13,9 @@ jobs:
     needs: read_config
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.10' }
+      - run: pip install requests
       - name: Install Titan's Arsenal
         run: |
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
@@ -22,11 +25,11 @@ jobs:
         run: |
           chmod +x modules/recon/web_basic.sh
           ./modules/recon/web_basic.sh ${{ matrix.target }}
-      - name: Archive Recon Data
-        uses: actions/upload-artifact@v4
-        with:
-          name: recon-data-${{ matrix.target }}
-          path: results/${{ matrix.target }}/recon
+      - name: Report to Command Center
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python core/reporter.py ${{ matrix.target }}
 
   read_config:
     runs-on: ubuntu-latest

@@ -1,34 +1,89 @@
-name: The Truth
+name: Titan Unchained
 on:
   workflow_dispatch:
 
 jobs:
-  debug:
+  read_config:
     runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.get_targets.outputs.targets_json }}
     steps:
-      - name: Checkout Project Code
-        uses: actions/checkout@v4
-
-      - name: Show me the truth - List ALL files
+      - uses: actions/checkout@v4
+      - id: get_targets
         run: |
-          echo "================== ROOT DIRECTORY =================="
-          ls -la
-          echo "================== .github/workflows DIRECTORY =================="
-          ls -la .github/workflows/
-          echo "================== core DIRECTORY =================="
-          ls -la core/
-          echo "================== modules DIRECTORY =================="
-          ls -la modules/
-          echo "================== modules/recon DIRECTORY =================="
-          ls -la modules/recon/
-          echo "================== modules/vulnerability DIRECTORY =================="
-          ls -la modules/vulnerability/
-          echo "================== modules/reporting DIRECTORY =================="
-          ls -la modules/reporting/
+          targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config/targets.txt)
+          echo "targets_json=$targets_json" >> $GITHUB_OUTPUT
 
-      - name: Show me the truth - Show me the file content
+  hunt:
+    needs: read_config
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.read_config.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install Dependencies
         run: |
-          echo "================== CONTENT of titan_core.yml =================="
-          cat .github/workflows/titan_core.yml
-          echo "================== CONTENT of analyze_and_report.sh =================="
-          cat modules/reporting/analyze_and_report.sh
+          pip install requests deep-translator
+          go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+          go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
+          go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+          mkdir -p results/${{ matrix.target }}
+
+      - name: Run Recon
+        id: recon
+        run: |
+          echo "Running Recon for ${{ matrix.target }}"
+          subfinder -d ${{ matrix.target }} -o results/${{ matrix.target }}/subdomains.txt -silent
+          httpx -l results/${{ matrix.target }}/subdomains.txt -o results/${{ matrix.target }}/live_hosts.txt -silent -threads 100
+          if [ -s "results/${{ matrix.target }}/live_hosts.txt" ]; then
+            echo "live_hosts_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "live_hosts_found=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run Scan
+        id: scan
+        if: steps.recon.outputs.live_hosts_found == 'true'
+        run: |
+          echo "Running Scan for ${{ matrix.target }}"
+          nuclei -l results/${{ matrix.target }}/live_hosts.txt -t "technologies,cves,vulnerabilities,misconfiguration" -o results/${{ matrix.target }}/nuclei_raw.txt -silent -severity critical,high,medium
+          if [ -s "results/${{ matrix.target }}/nuclei_raw.txt" ]; then
+            echo "findings_detected=true" >> $GITHUB_OUTPUT
+          else
+            echo "findings_detected=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Analyze and Report
+        if: steps.scan.outputs.findings_detected == 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
+        run: |
+          echo "Analyzing and Reporting for ${{ matrix.target }}"
+          FINDINGS=$(cat results/${{ matrix.target }}/nuclei_raw.txt)
+          AI_SUMMARY=$(python3 core/ai_analyzer.py "$FINDINGS")
+          python3 core/discord_notifier.py "${{ matrix.target }}" "$AI_SUMMARY" "$FINDINGS"
+          python3 core/pdf_generator.py "${{ matrix.target }}" "$AI_SUMMARY" "results/${{ matrix.target }}/nuclei_raw.txt"
+
+      - name: Send Completion Notification
+        if: always() && steps.scan.outputs.findings_detected != 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          python3 core/discord_notifier.py "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
+
+      - name: Upload Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.target }}
+          path: results/${{ matrix.target }}/

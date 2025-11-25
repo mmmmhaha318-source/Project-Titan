@@ -1,4 +1,4 @@
-name: Titan Unchained v3.0 (Absolute Path)
+name: Titan Unchained v4.0 (The Smart Solution)
 on:
   workflow_dispatch:
 
@@ -8,7 +8,10 @@ jobs:
     outputs:
       targets: ${{ steps.get_targets.outputs.targets_json }}
     steps:
+      # THE SMART FIX IS HERE: Checkout to the root directory '.'
       - uses: actions/checkout@v4
+        with:
+          path: '.'
       - id: get_targets
         run: |
           targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' config/targets.txt)
@@ -22,7 +25,10 @@ jobs:
       matrix:
         target: ${{ fromJson(needs.read_config.outputs.targets) }}
     steps:
+      # AND THE SMART FIX IS HERE TOO
       - uses: actions/checkout@v4
+        with:
+          path: '.'
       - uses: actions/setup-go@v5
         with:
           go-version: '1.21'
@@ -71,26 +77,24 @@ jobs:
         run: |
           echo "Analyzing and Reporting for ${{ matrix.target }}"
           FINDINGS=$(cat results/${{ matrix.target }}/nuclei_raw.txt)
-          # ABSOLUTE PATH FIX
-          AI_SUMMARY=$(python3 ${{ github.workspace }}/core/ai_analyzer.py "$FINDINGS")
-          python3 ${{ github.workspace }}/core/discord_notifier.py "${{ matrix.target }}" "$AI_SUMMARY" "$FINDINGS"
-          python3 ${{ github.workspace }}/core/pdf_generator.py "${{ matrix.target }}" "$AI_SUMMARY" "results/${{ matrix.target }}/nuclei_raw.txt"
+          # Now this should work because the path is correct
+          AI_SUMMARY=$(python3 core/ai_analyzer.py "$FINDINGS")
+          python3 core/discord_notifier.py "${{ matrix.target }}" "$AI_SUMMARY" "$FINDINGS"
+          python3 core/pdf_generator.py "${{ matrix.target }}" "$AI_SUMMARY" "results/${{ matrix.target }}/nuclei_raw.txt"
 
       - name: Send Completion Notification
         if: success() && steps.scan.outputs.findings_detected != 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          # ABSOLUTE PATH FIX
-          python3 ${{ github.workspace }}/core/discord_notifier.py "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
+          python3 core/discord_notifier.py "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
 
       - name: Send Failure Notification
         if: failure()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          # ABSOLUTE PATH FIX
-          python3 ${{ github.workspace }}/core/discord_notifier.py "❌ Titan Hunt Failed" "The hunt for ${{ matrix.target }} failed. Please check the logs."
+          python3 core/discord_notifier.py "❌ Titan Hunt Failed" "The hunt for ${{ matrix.target }} failed. Please check the logs."
 
       - name: Upload Artifacts
         if: always()

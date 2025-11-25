@@ -1,4 +1,4 @@
-name: Titan Unchained v5.2 (Respecting The Law)
+name: Titan Unchained v5.3 (The Clean Copy)
 on:
   workflow_dispatch:
 
@@ -35,7 +35,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      # THE FIX: Run Go installations from the root, BEFORE entering the working directory.
       - name: Install Go Tools (Global)
         run: |
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
@@ -43,17 +42,17 @@ jobs:
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
-      # Now, all subsequent steps will run inside the correct folder.
       - name: Install Python Dependencies & Prepare Workspace
-        working-directory: ./Project-Titan
         run: |
           pip install requests deep-translator
+          cd ./Project-Titan
           mkdir -p results/${{ matrix.target }}
           nuclei -update-templates
+        # THE SYNTAX FIX: working-directory was removed from here as it's not needed
 
       - name: Run Recon
-        working-directory: ./Project-Titan
         id: recon
+        working-directory: ./Project-Titan
         run: |
           echo "Running Recon for ${{ matrix.target }}"
           subfinder -d ${{ matrix.target }} -o results/${{ matrix.target }}/subdomains.txt -silent
@@ -65,8 +64,8 @@ jobs:
           fi
 
       - name: Run Scan
-        working-directory: ./Project-Titan
         id: scan
+        working-directory: ./Project-Titan
         if: steps.recon.outputs.live_hosts_found == 'true'
         run: |
           echo "Running Scan for ${{ matrix.target }}"
@@ -78,8 +77,8 @@ jobs:
           fi
 
       - name: Analyze and Report
-        working-directory: ./Project-Titan
         if: success() && steps.scan.outputs.findings_detected == 'true'
+        working-directory: ./Project-Titan
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
@@ -91,24 +90,24 @@ jobs:
           python3 core/pdf_generator.py "${{ matrix.target }}" "$AI_SUMMARY" "results/${{ matrix.target }}/nuclei_raw.txt"
 
       - name: Send Completion Notification
-        working-directory: ./Project-Titan
         if: success() && steps.scan.outputs.findings_detected != 'true'
+        working-directory: ./Project-Titan
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python3 core/discord_notifier.py "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
 
       - name: Send Failure Notification
-        working-directory: ./Project-Titan
         if: failure()
+        working-directory: ./Project-Titan
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
           python3 core/discord_notifier.py "❌ Titan Hunt Failed" "The hunt for ${{ matrix.target }} failed. Please check the logs."
 
       - name: Upload Artifacts
-        working-directory: ./Project-Titan
         if: always()
+        working-directory: ./Project-Titan
         uses: actions/upload-artifact@v4
         with:
           name: results-${{ matrix.target }}

@@ -1,4 +1,4 @@
-name: Titan Unchained v5.1 (The Golden Key)
+name: Titan Unchained v5.2 (Respecting The Law)
 on:
   workflow_dispatch:
 
@@ -8,12 +8,10 @@ jobs:
     outputs:
       targets: ${{ steps.get_targets.outputs.targets_json }}
     steps:
-      # THE GOLDEN KEY FIX: Checkout the code into the nested folder first!
       - uses: actions/checkout@v4
         with:
           path: Project-Titan
       - id: get_targets
-        # Now, run the command from the root, but point to the correct file inside the nested folder
         run: |
           targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' Project-Titan/config/targets.txt)
           echo "targets_json=$targets_json" >> $GITHUB_OUTPUT
@@ -21,9 +19,6 @@ jobs:
   hunt:
     needs: read_config
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./Project-Titan
     strategy:
       fail-fast: false
       matrix:
@@ -40,17 +35,24 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies & Tools
+      # THE FIX: Run Go installations from the root, BEFORE entering the working directory.
+      - name: Install Go Tools (Global)
         run: |
-          pip install requests deep-translator
           go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
           go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
           go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
           echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      # Now, all subsequent steps will run inside the correct folder.
+      - name: Install Python Dependencies & Prepare Workspace
+        working-directory: ./Project-Titan
+        run: |
+          pip install requests deep-translator
           mkdir -p results/${{ matrix.target }}
           nuclei -update-templates
 
       - name: Run Recon
+        working-directory: ./Project-Titan
         id: recon
         run: |
           echo "Running Recon for ${{ matrix.target }}"
@@ -63,6 +65,7 @@ jobs:
           fi
 
       - name: Run Scan
+        working-directory: ./Project-Titan
         id: scan
         if: steps.recon.outputs.live_hosts_found == 'true'
         run: |
@@ -75,6 +78,7 @@ jobs:
           fi
 
       - name: Analyze and Report
+        working-directory: ./Project-Titan
         if: success() && steps.scan.outputs.findings_detected == 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -87,6 +91,7 @@ jobs:
           python3 core/pdf_generator.py "${{ matrix.target }}" "$AI_SUMMARY" "results/${{ matrix.target }}/nuclei_raw.txt"
 
       - name: Send Completion Notification
+        working-directory: ./Project-Titan
         if: success() && steps.scan.outputs.findings_detected != 'true'
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -94,6 +99,7 @@ jobs:
           python3 core/discord_notifier.py "✅ Titan Hunt Completed" "Reconnaissance for ${{ matrix.target }} is finished. No critical vulnerabilities found in this run."
 
       - name: Send Failure Notification
+        working-directory: ./Project-Titan
         if: failure()
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -101,6 +107,7 @@ jobs:
           python3 core/discord_notifier.py "❌ Titan Hunt Failed" "The hunt for ${{ matrix.target }} failed. Please check the logs."
 
       - name: Upload Artifacts
+        working-directory: ./Project-Titan
         if: always()
         uses: actions/upload-artifact@v4
         with:

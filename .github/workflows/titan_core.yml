@@ -1,4 +1,4 @@
-name: Titan Unchained v5.0 (The Operations Room)
+name: Titan Unchained v5.1 (The Golden Key)
 on:
   workflow_dispatch:
 
@@ -8,10 +8,12 @@ jobs:
     outputs:
       targets: ${{ steps.get_targets.outputs.targets_json }}
     steps:
+      # THE GOLDEN KEY FIX: Checkout the code into the nested folder first!
       - uses: actions/checkout@v4
+        with:
+          path: Project-Titan
       - id: get_targets
-        # We are now inside the first "Project-Titan" folder
-        # So we need to go inside the second one to find the config
+        # Now, run the command from the root, but point to the correct file inside the nested folder
         run: |
           targets_json=$(jq -R -s -c 'split("\n") | map(select(length > 0))' Project-Titan/config/targets.txt)
           echo "targets_json=$targets_json" >> $GITHUB_OUTPUT
@@ -19,8 +21,6 @@ jobs:
   hunt:
     needs: read_config
     runs-on: ubuntu-latest
-    # THE SMART FIX: Define the working directory for the entire job!
-    # All commands will now run from inside the real project folder.
     defaults:
       run:
         working-directory: ./Project-Titan
@@ -30,7 +30,6 @@ jobs:
         target: ${{ fromJson(needs.read_config.outputs.targets) }}
     steps:
       - uses: actions/checkout@v4
-        # We still need to checkout the code into the nested folder
         with:
           path: ./Project-Titan
 
@@ -83,7 +82,6 @@ jobs:
         run: |
           echo "Analyzing and Reporting for ${{ matrix.target }}"
           FINDINGS=$(cat results/${{ matrix.target }}/nuclei_raw.txt)
-          # Now the paths are simple and correct because we are in the right directory!
           AI_SUMMARY=$(python3 core/ai_analyzer.py "$FINDINGS")
           python3 core/discord_notifier.py "${{ matrix.target }}" "$AI_SUMMARY" "$FINDINGS"
           python3 core/pdf_generator.py "${{ matrix.target }}" "$AI_SUMMARY" "results/${{ matrix.target }}/nuclei_raw.txt"
